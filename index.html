@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title></title>
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #222;
+  color: #ddd;
+}
+
+.mother-view {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.mother-view table {
+  width: 100%;
+  max-height: 100%;
+  border-collapse: collapse;
+  position: sticky;
+  text-align: center;
+}
+.mother-view > table > thead {
+  position: sticky;
+  top: -1px;
+  background: black;
+}
+.mother-view > table > thead > tr > td {
+  min-width: 7vw;
+}
+</style>
+<script>
+class Observable {
+  constructor() {
+    this.callbacks = [];
+  }
+  observe(callback) {
+    this.callbacks.push(callback);
+    callback(this);
+  }
+  dispatch() {
+    for (let callback of this.callbacks) {
+      callback(this);
+    }
+  }
+}
+
+class RoundState extends Observable {
+  constructor(delegate) {
+    super();
+  }
+}
+
+class RowState {
+  constructor(type, approvers, text = '') {
+    this.type = type;
+    this.approvers = approvers;
+    this.text = text;
+  }
+  json() {
+    return {
+      "type": this.type,
+      "approvers": this.approvers,
+      "text": this.text,
+    }
+  }
+  static from_json(json) {
+    return new RowState(json.type, json.approvers, json.text);
+  }
+}
+
+class MotherState extends Observable {
+  constructor() {
+    super();
+    this._players = [];
+    this._rows = [];
+    this._firstProposer = undefined;
+  }
+  add_player(name) {
+    this._players.push(name);
+    this.dispatch();
+  }
+  add_row(row) {
+    this._rows.push(row);
+    this.dispatch();
+  }
+  get players() {
+    return this._players;
+  }
+  set rows(rows) {
+    this._rows = rows;
+    this.dispatch();
+  }
+  get rows() {
+    return this._rows;
+  }
+  set firstProposer(name) {
+    this._firstProposer = name;
+    this.dispatch();
+  }
+  get firstProposer() {
+    return this._firstProposer;
+  }
+  json() {
+    return {
+      "players": this._players,
+      "rows": this._rows.map(row => row.json()),
+    }
+  }
+  static from_json(json) {
+    let state = new MotherState();
+    state._players = json.players;
+    state._rows = json.rows.map(row => RowState.from_json(row));
+    return state;
+  }
+}
+
+function string2div(x) {
+  let r = document.createElement('div');
+  r.innerHTML = x;
+  return r;
+}
+
+function render_row(tr, rows, f) {
+  tr.innerHTML = '';
+  for (let row of rows) {
+    let td = document.createElement('td');
+    td.appendChild(f(row));
+    tr.appendChild(td);
+  }
+}
+
+class MotherView extends HTMLElement {
+  constructor(state) {
+    super();
+    state.observe((state) => this.onchange(state));
+  }
+  onchange(state) {
+    this.state = state;
+    if (!document.body.contains(this)) {
+      return;
+    }
+
+    while (this.tbody.children.length > state.rows.length + 2) {
+      this.tbody.removeChild(this.tbody.children[this.tbody.children.length - 1]);
+    }
+    while (this.tbody.children.length < state.rows.length + 2) {
+      let tr = document.createElement('tr');
+      this.tbody.appendChild(tr);
+    }
+
+    render_row(this.header.children[0], [''].concat(state.players).concat(['Result']), (data) => {
+      const div = string2div(data);
+      div.addEventListener('click', () => {
+        this.state.firstProposer = data;
+      });
+      return div;
+    });
+
+    let proposer = this.state.firstProposer;
+    for (let i = 0; i < state.rows.length; ++i) {
+      const row = state.rows[i];
+      this.render_row(this.tbody.children[i + 1], row, proposer);
+      if (row.type === 'Vote' && proposer) {
+        const idx = state.players.indexOf(proposer);
+        proposer = state.players[(idx + 1) % state.players.length];
+      }
+    }
+
+    {
+      const lastTr = this.tbody.children[this.tbody.children.length - 1];
+      lastTr.style.backgroundColor = '';
+      lastTr.innerHTML = `
+        <td style="padding: 0.5em 0;"><button>New</button></td>
+        <td style="padding: 0.5em 0;"><button>Clear</button></td>
+      `;
+      lastTr.children[0].children[0].addEventListener('click', () => {
+        this.state.rows.push(new RowState('Propose', [], ''));
+        this.state.dispatch();
+      });
+      lastTr.children[1].children[0].addEventListener('click', () => {
+        if (confirm('Are you sure you want to clear?')) {
+          this.state.rows = [
+            new RowState('Propose', [], ''),
+          ];
+        }
+      });
+    }
+  }
+  render_row(tr, row, proposer) {
+    tr.innerHTML = `<td>${row.type}</td>`;
+    if (row.type === 'Propose') {
+      tr.style.backgroundColor = '#444';
+    } else {
+      tr.style.backgroundColor = '';
+    }
+    tr.children[0].addEventListener('click', () => {
+      if (row.type === 'Propose') {
+        row.type = 'Vote';
+      } else if (row.type === 'Vote') {
+        row.type = 'Text';
+      } else if (row.type === 'Text') {
+        row.type = 'Propose';
+      }
+      this.state.dispatch();
+    });
+    if (row.type === 'Text') {
+      let td = document.createElement('td');
+      td.setAttribute('colspan', this.state.players.length);
+      td.innerHTML = `<input value="${row.text}" style="width:calc(100% - 2em)"></textarea>`;
+      const input = td.children[0];
+      input.addEventListener('change', () => {
+        row.text = input.value;
+        this.state.dispatch();
+      })
+      tr.appendChild(td);
+      return;
+    }
+    for (let player of this.state.players) {
+      let td = document.createElement('td');
+      td.addEventListener('click', () => {
+        if (row.approvers.includes(player)) {
+          row.approvers.splice(row.approvers.indexOf(player), 1);
+        } else {
+          row.approvers.push(player);
+        }
+        this.state.dispatch();
+      })
+
+      const isProposer = (proposer === player);
+      const isApprover = row.approvers.includes(player);
+
+      td.innerHTML = (row.approvers.includes(player) ? '✅' : '❌');
+      if (isProposer) {
+        td.style.backgroundColor = 'white';
+      }
+      tr.appendChild(td);
+    }
+
+    if (row.type === 'Vote') {
+      let td = document.createElement('td');
+      if (row.approvers.length > this.state.players.length / 2) {
+        td.innerHTML = '✅';
+      } else {
+        td.innerHTML = '❌';
+      }
+      tr.appendChild(td);
+    }
+
+    tr.appendChild(document.createElement('TD'));
+  }
+  connectedCallback() {
+    this.innerHTML = '';
+    this.classList.add('mother-view');
+
+    this.table = document.createElement('TABLE');
+    this.table.setAttribute('border', '1')
+    this.appendChild(this.table);
+
+    this.header = document.createElement('THEAD');
+    this.header.innerHTML = '<tr></tr>';
+    this.table.appendChild(this.header);
+
+    this.tbody = document.createElement('TBODY');
+    this.table.appendChild(this.tbody);
+
+    this.onchange(this.state);
+  }
+
+  disconnectedCallback() {
+    this.innerHTML = '';
+  }
+}
+customElements.define("mother-view", MotherView);
+
+
+let gState;
+window.addEventListener('load', () => {
+  gState = new MotherState();
+  if (window.localStorage.getItem('state')) {
+    gState = MotherState.from_json(JSON.parse(window.localStorage.getItem('state')));
+  } else {
+    gState.add_player('Chelsea');
+    gState.add_player('Jason');
+    gState.add_player('Oliver');
+    gState.add_player('Keira');
+    gState.add_player('Janet');
+    gState.add_player('Ken');
+    gState.add_player('Liang');
+    gState.add_player('Hannah');
+    gState.add_player('Morgan');
+    for (let i = 0; i < 50; ++i) {
+      gState.add_row(new RowState('Propose', [], ''));
+    }
+  }
+  gState.observe((state) => {
+    window.localStorage.setItem('state', JSON.stringify(state.json()));
+  });
+  document.body.appendChild(new MotherView(gState));
+});
+</script>
+</head>
+<body>
+</body>
+</html>
