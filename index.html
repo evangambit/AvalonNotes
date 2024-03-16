@@ -113,7 +113,6 @@ class MotherView extends HTMLElement {
     }
   }
   render_row(tr, row, proposer) {
-    console.log(tr, row);
     tr.innerHTML = `<td>${row.type}</td>`;
     if (row.type === 'Propose') {
       tr.style.backgroundColor = '#444';
@@ -206,15 +205,15 @@ window.addEventListener('load', () => {
   if (window.localStorage.getItem('state')) {
     gState = MotherState.from_json(JSON.parse(window.localStorage.getItem('state')));
   } else {
-    gState.add_player('Chelsea');
-    gState.add_player('Jason');
-    gState.add_player('Oliver');
-    gState.add_player('Keira');
+    gState.add_player('Hannah');
+    gState.add_player('Liang');
     gState.add_player('Janet');
     gState.add_player('Ken');
-    gState.add_player('Liang');
-    gState.add_player('Hannah');
+    gState.add_player('Jason');
+    gState.add_player('Chelsea');
     gState.add_player('Morgan');
+    gState.add_player('Keira');
+    gState.add_player('Oliver');
     gState.add_row(new RowState('Propose', [], ''));
   }
   gState.observe((state) => {
